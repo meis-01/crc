@@ -1,0 +1,41 @@
+# CODE-II waveforms and generated data live on D: via the data junction.
+data/raw/**
+data/interim/**
+data/processed/**
+
+# Local downloads and research artifacts
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.mat
+*.dat
+*.hea
+*.zip
+*.tar
+*.tar.gz
+nature_article.html
+phys*.html
+code_site*.html
+code_ii_paper.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+
+# Generated reports (keep the authored report)
+reports/figures/*.png
+reports/*.json
+reports/*.csv
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
