@@ -1,0 +1,34 @@
+data_root: "C:/Users/meisa/Data/eeg/ds003775_10"
+target_channel: "Oz"
+resample_hz: 250.0
+subject_id: "sub-001"
+session: null
+task: "resteyesc"
+psd:
+  fmin_hz: 0.5
+  fmax_hz: 45.0
+wilson_cowan:
+  tau_e: 0.01
+  tau_i: 0.02
+  w_ee: 10.0
+  w_ei: 12.0
+  w_ie: 10.0
+  w_ii: 0.0
+  p: 0.5
+  q: 0.0
+  sigmoid_gain: 1.5
+  sigmoid_theta: 2.5
+fit:
+  dt: 0.004
+  duration_s: 12.0
+  maxiter: 3
+  population_size: 4
+  polish: false
+  random_seed: 0
+reservoir:
+  input_scale: 0.2
+  readout_ridge: 1.0e-4
+prediction:
+  train_fraction: 0.8
+  washout_samples: 500
+  warmup_samples: 500

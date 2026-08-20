@@ -1,7 +1,5 @@
-h5py>=3.11
-matplotlib>=3.9
+mne>=1.8
 numpy>=2.0
+PyYAML>=6.0
 scipy>=1.13
-wfdb>=4.2
 pytest>=8.2
-
