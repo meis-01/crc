@@ -15,9 +15,13 @@ from physics_esn.data.loader import (
     load_single_channel,
     select_subject_recording,
 )
-from physics_esn.data.preprocessing import preprocess_oz_signal
+from physics_esn.data.preprocessing import preprocess_chronological_split
 from physics_esn.fitting.wilson_cowan_fit import fit_wilson_cowan_psd, save_subject_fit
-from physics_esn.models.physics_reservoir import build_physics_informed_reservoir
+from physics_esn.models.physics_reservoir import (
+    DETERMINISTIC_RESERVOIR_MODE,
+    build_physics_informed_reservoir,
+    generate_continuous_reservoir_modes,
+)
 from physics_esn.models.wilson_cowan import (
     WilsonCowanParameters,
     continuous_eigenvalues,
@@ -83,23 +87,30 @@ def run_sub001_pipeline(config_path: str | Path, output_dir: str | Path = "artif
     LOGGER.info("Inspecting raw EDF header before loading or resampling: %s", recording.edf_path)
     raw_summary = inspect_raw_recording(recording.edf_path)
     raw_oz, raw_rate = load_single_channel(recording.edf_path, config["target_channel"])
-    signal, rate = preprocess_oz_signal(raw_oz, raw_rate, target_rate_hz=config.get("resample_hz"))
-    LOGGER.info("Loaded %s and preprocessed Oz from %.1f Hz to %.1f Hz.", recording.subject_id, raw_rate, rate)
+    train_fraction = float(config["prediction"]["train_fraction"])
+    split = preprocess_chronological_split(
+        raw_oz,
+        raw_rate,
+        train_fraction,
+        target_rate_hz=config.get("resample_hz"),
+    )
+    train_signal = split.train
+    test_signal = split.test
+    rate = split.sampling_rate_hz
+    split_index = train_signal.size
+    LOGGER.info(
+        "Loaded %s, split raw Oz at sample %d, and preprocessed train/test separately from %.1f Hz to %.1f Hz.",
+        recording.subject_id,
+        split.raw_split_index,
+        raw_rate,
+        rate,
+    )
     freqs, power = compute_psd(
-        signal,
+        train_signal,
         rate,
         fmin_hz=config["psd"]["fmin_hz"],
         fmax_hz=config["psd"]["fmax_hz"],
     )
-
-    train_fraction = float(config["prediction"]["train_fraction"])
-    if not 0.0 < train_fraction < 1.0:
-        raise ValueError("prediction.train_fraction must be between zero and one.")
-    split_index = int(signal.size * train_fraction)
-    train_signal = signal[:split_index]
-    test_signal = signal[split_index:]
-    if train_signal.size < 2 or test_signal.size < 2:
-        raise ValueError("The chronological train/test split produced an empty partition.")
 
     initial_params = _params_from_config(config)
     dt = float(config["fit"]["dt"])
@@ -122,15 +133,39 @@ def run_sub001_pipeline(config_path: str | Path, output_dir: str | Path = "artif
     jacobian = jacobian_at_equilibrium(equilibrium, fitted)
     lambdas = continuous_eigenvalues(jacobian)
     mus = discrete_reservoir_eigenvalues(lambdas, dt=dt)
+    reservoir_config = config["reservoir"]
+    reservoir_mode = str(reservoir_config.get("reservoir_mode", DETERMINISTIC_RESERVOIR_MODE))
+    requested_reservoir_size = int(reservoir_config.get("reservoir_size", 2))
+    eigenvalue_sigma_real = float(reservoir_config.get("eigenvalue_sigma_real", 0.0))
+    eigenvalue_sigma_imag = float(reservoir_config.get("eigenvalue_sigma_imag", 0.0))
+    reservoir_seed = int(reservoir_config.get("random_seed", 0))
+    if reservoir_mode == DETERMINISTIC_RESERVOIR_MODE:
+        mode_seed = input_seed = reservoir_seed
+    else:
+        mode_seed_sequence, input_seed_sequence = np.random.SeedSequence(reservoir_seed).spawn(2)
+        mode_seed = int(mode_seed_sequence.generate_state(1, dtype=np.uint64)[0])
+        input_seed = int(input_seed_sequence.generate_state(1, dtype=np.uint64)[0])
+    reservoir_lambdas = generate_continuous_reservoir_modes(
+        lambdas,
+        reservoir_mode=reservoir_mode,
+        reservoir_size=requested_reservoir_size,
+        eigenvalue_sigma_real=eigenvalue_sigma_real,
+        eigenvalue_sigma_imag=eigenvalue_sigma_imag,
+        seed=mode_seed,
+    )
+    reservoir_mus = discrete_reservoir_eigenvalues(reservoir_lambdas, dt=dt)
+    if not np.all(np.isfinite(reservoir_mus)) or np.any(np.abs(reservoir_mus) >= 1.0):
+        raise RuntimeError("Stable continuous reservoir modes must map strictly inside the unit circle.")
     reservoir = build_physics_informed_reservoir(
-        mus,
-        input_scale=float(config["reservoir"]["input_scale"]),
+        reservoir_mus,
+        input_scale=float(reservoir_config["input_scale"]),
+        seed=input_seed,
     )
     washout_samples = int(config["prediction"]["washout_samples"])
     warmup_samples = min(int(config["prediction"]["warmup_samples"]), train_signal.size)
     reservoir.fit_one_step(
         train_signal,
-        ridge=float(config["reservoir"]["readout_ridge"]),
+        ridge=float(reservoir_config["readout_ridge"]),
         washout_samples=washout_samples,
     )
     warmup_values = train_signal[-warmup_samples:] if warmup_samples else None
@@ -154,6 +189,7 @@ def run_sub001_pipeline(config_path: str | Path, output_dir: str | Path = "artif
         predictions=predictions,
         sampling_rate_hz=rate,
         split_index=split_index,
+        raw_split_index=split.raw_split_index,
     )
     save_subject_fit(
         subject_dir / "wilson_cowan_fit.json",
@@ -169,6 +205,16 @@ def run_sub001_pipeline(config_path: str | Path, output_dir: str | Path = "artif
         "recording_path": str(recording.edf_path),
         "raw_summary": raw_summary,
         "processed_sampling_rate_hz": rate,
+        "raw_split_index": split.raw_split_index,
+        "processed_split_index": split_index,
+        "preprocessing": {
+            "trend_intercept": split.preprocessor.trend_intercept_,
+            "trend_slope_per_raw_sample": split.preprocessor.trend_slope_,
+            "normalization_mean": split.preprocessor.normalization_mean_,
+            "normalization_std": split.preprocessor.normalization_std_,
+            "resample_edge_guard_samples": split.preprocessor.resample_guard_samples,
+            "resample_edge_guard_discarded": False,
+        },
         "psd_points": len(freqs),
         "train_samples": int(train_signal.size),
         "test_samples": int(test_signal.size),
@@ -178,6 +224,18 @@ def run_sub001_pipeline(config_path: str | Path, output_dir: str | Path = "artif
         "jacobian": jacobian.tolist(),
         "continuous_eigenvalues": [[float(value.real), float(value.imag)] for value in lambdas],
         "discrete_eigenvalues": [[float(value.real), float(value.imag)] for value in mus],
+        "reservoir_mode": reservoir_mode,
+        "requested_reservoir_size": requested_reservoir_size,
+        "reservoir_eigenvalue_sigma_real": eigenvalue_sigma_real,
+        "reservoir_eigenvalue_sigma_imag": eigenvalue_sigma_imag,
+        "reservoir_random_seed": reservoir_seed,
+        "reservoir_continuous_eigenvalues": [
+            [float(value.real), float(value.imag)] for value in reservoir_lambdas
+        ],
+        "reservoir_discrete_eigenvalues": [
+            [float(value.real), float(value.imag)] for value in reservoir_mus
+        ],
+        "reservoir_max_eigenvalue_modulus": float(np.max(np.abs(reservoir_mus))),
         "reservoir_size": int(reservoir.reservoir.state.size),
         "simulation_samples": int(simulated_states.shape[0]),
         "prediction_metrics": metrics,

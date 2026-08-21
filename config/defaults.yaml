@@ -26,6 +26,12 @@ fit:
   polish: false
   random_seed: 0
 reservoir:
+  reservoir_mode: gaussian_eigenvalue_cloud
+  reservoir_size: 100
+  # Continuous-time spread: decay rate in s^-1 and angular frequency in rad/s.
+  eigenvalue_sigma_real: 5.0
+  eigenvalue_sigma_imag: 5.0
+  random_seed: 0
   input_scale: 0.2
   readout_ridge: 1.0e-4
 prediction:
