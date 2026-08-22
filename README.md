@@ -99,7 +99,7 @@ This is the most constrained reservoir and serves as the linear physics-informed
 After fitting the WC parameters, the implementation finds an equilibrium
 
 $$
-x^*=[E^*,I^*]^T
+x^\ast = [E^\ast, I^\ast]^\top
 $$
 
 and evaluates the Jacobian of the WC vector field at that point:
