@@ -25,7 +25,7 @@ $\Delta t$:
 
 $$
 \mu_k = \exp(\lambda_k\Delta t), \qquad
-z_{t+1} = \operatorname{diag}(\mu_k)z_t + W_{\rm in}u_t.
+z_{t+1} = \mathrm{diag}(\mu_k)z_t + W_{\mathrm{in}}u_t.
 $$
 
 This mode represents local time scales near one equilibrium; it is not a
@@ -38,8 +38,8 @@ This linear mode samples a configurable population around the fitted continuous
 poles before discretization:
 
 $$
-\widetilde\lambda_j = (\operatorname{Re}\lambda_k+\epsilon_r)
-  + i(\operatorname{Im}\lambda_k+\epsilon_i),
+\widetilde\lambda_j = (\Re\lambda_k+\epsilon_r)
+  + i(\Im\lambda_k+\epsilon_i),
 $$
 
 $$
@@ -50,7 +50,7 @@ $$
 
 Sampling occurs in continuous-time eigenvalue space, conjugate pairs are kept
 exactly, and samples must satisfy
-$\operatorname{Re}\widetilde\lambda_j<0$, equivalently
+$\Re\widetilde\lambda_j<0$, equivalently
 $|\widetilde\mu_j|<1$. The previous name
 `gaussian_eigenvalue_cloud` remains accepted as a compatibility alias.
 
@@ -107,7 +107,7 @@ The default WC objective remains the original training-only PSD shape loss. An
 optional hybrid objective is configured as
 
 $$
-L=\alpha L_{\rm PSD}+\beta L_{\rm STFT}+\eta L_{\rm temporal}.
+L=\alpha L_{\mathrm{PSD}}+\beta L_{\mathrm{STFT}}+\eta L_{\mathrm{temporal}}.
 $$
 
 `fit.loss.stft_weight: 0.0` and `temporal_weight: 0.0` preserve PSD-only fitting.
@@ -150,7 +150,7 @@ population.
 The validity criteria deliberately differ by architecture:
 
 - Linear modes require continuous stability
-  $\operatorname{Re}(\lambda)<0$ and discrete stability $|\mu|<1$.
+  $\Re(\lambda)<0$ and discrete stability $|\mu|<1$.
 - Nonlinear modes require a finite, bounded RK4 preflight trajectory inside the
   configured state bounds. They are not rejected merely because an equilibrium
   has a nonnegative eigenvalue real part, since bounded oscillations around a
