@@ -38,8 +38,8 @@ This linear mode samples a configurable population around the fitted continuous
 poles before discretization:
 
 $$
-\widetilde\lambda_j = (\Re\lambda_k+\epsilon_r)
-  + i(\Im\lambda_k+\epsilon_i),
+\widetilde{\lambda}_j = (\mathrm{Re}\,\lambda_k+\epsilon_r) + i(\mathrm{Im}\,\lambda_k+\epsilon_i),
+$$
 $$
 
 $$
