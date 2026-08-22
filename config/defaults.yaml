@@ -4,10 +4,13 @@ resample_hz: 250.0
 subject_id: "sub-001"
 session: null
 task: "resteyesc"
+
 psd:
   fmin_hz: 0.5
   fmax_hz: 45.0
+
 wilson_cowan:
+  # Time constants are seconds. Population activities E and I are fractions.
   tau_e: 0.01
   tau_i: 0.02
   w_ee: 10.0
@@ -18,15 +21,27 @@ wilson_cowan:
   q: 0.0
   sigmoid_gain: 1.5
   sigmoid_theta: 2.5
+
 fit:
+  # Seconds; with the default 250 Hz signal, dt equals one EEG sample interval.
   dt: 0.004
   duration_s: 12.0
   maxiter: 3
   population_size: 4
   polish: false
   random_seed: 0
+  loss:
+    # These defaults preserve the original PSD-only fitting objective.
+    psd_weight: 1.0
+    stft_weight: 0.0
+    temporal_weight: 0.0
+    stft_window_seconds: 1.0
+    stft_overlap_fraction: 0.5
+
 reservoir:
-  reservoir_mode: gaussian_eigenvalue_cloud
+  # Legacy aliases `deterministic` and `gaussian_eigenvalue_cloud` remain valid.
+  # `distributed_poles` preserves the previous default numerical experiment.
+  reservoir_mode: distributed_poles
   reservoir_size: 100
   # Continuous-time spread: decay rate in s^-1 and angular frequency in rad/s.
   eigenvalue_sigma_real: 5.0
@@ -34,7 +49,35 @@ reservoir:
   random_seed: 0
   input_scale: 0.2
   readout_ridge: 1.0e-4
+
+nonlinear_reservoir:
+  num_blocks: 50
+  # A scalar is a fractional jitter scale. A per-parameter mapping is also accepted.
+  parameter_jitter: 0.05
+  input_scale: 0.1
+  random_seed: 0
+  rk4_substeps: 1
+  initial_state: [0.1, 0.1]
+  preflight_duration_s: 0.25
+  max_resample_attempts: 100
+  # Accepted numerical range during preflight; the theoretical WC range is [0, 1].
+  state_bounds: [-0.05, 1.05]
+
+coupling:
+  # Coupling is considered only in coupled_nonlinear_wc mode.
+  enabled: true
+  degree: 4
+  strength: 0.05
+  random_seed: 0
+
 prediction:
   train_fraction: 0.8
   washout_samples: 500
   warmup_samples: 500
+
+ablation:
+  modes:
+    - deterministic_poles
+    - distributed_poles
+    - independent_nonlinear_wc
+    - coupled_nonlinear_wc

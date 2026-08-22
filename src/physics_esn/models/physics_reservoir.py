@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 
@@ -8,8 +9,44 @@ from physics_esn.models.complex_esn import ComplexESN
 from physics_esn.models.esn import LinearReadout, fit_ridge_readout
 
 
+# Keep the original public constants and mode strings as compatibility aliases.
 DETERMINISTIC_RESERVOIR_MODE = "deterministic"
 GAUSSIAN_EIGENVALUE_CLOUD_MODE = "gaussian_eigenvalue_cloud"
+
+# Canonical experiment names used in new configurations and artifacts.
+DETERMINISTIC_POLES_MODE = "deterministic_poles"
+DISTRIBUTED_POLES_MODE = "distributed_poles"
+INDEPENDENT_NONLINEAR_WC_MODE = "independent_nonlinear_wc"
+COUPLED_NONLINEAR_WC_MODE = "coupled_nonlinear_wc"
+
+RESERVOIR_MODE_ALIASES = {
+    DETERMINISTIC_RESERVOIR_MODE: DETERMINISTIC_POLES_MODE,
+    DETERMINISTIC_POLES_MODE: DETERMINISTIC_POLES_MODE,
+    GAUSSIAN_EIGENVALUE_CLOUD_MODE: DISTRIBUTED_POLES_MODE,
+    DISTRIBUTED_POLES_MODE: DISTRIBUTED_POLES_MODE,
+    INDEPENDENT_NONLINEAR_WC_MODE: INDEPENDENT_NONLINEAR_WC_MODE,
+    COUPLED_NONLINEAR_WC_MODE: COUPLED_NONLINEAR_WC_MODE,
+}
+
+
+def normalize_reservoir_mode(reservoir_mode: str) -> str:
+    """Return the canonical name for a supported reservoir mode."""
+    try:
+        return RESERVOIR_MODE_ALIASES[str(reservoir_mode)]
+    except KeyError as error:
+        choices = ", ".join(sorted(RESERVOIR_MODE_ALIASES))
+        raise ValueError(f"Unknown reservoir_mode {reservoir_mode!r}; expected one of: {choices}.") from error
+
+
+@runtime_checkable
+class ReservoirDynamics(Protocol):
+    """Minimal fixed-dynamics interface consumed by the ridge-readout wrapper."""
+
+    state: np.ndarray
+
+    def reset(self) -> None: ...
+
+    def run(self, signal_values: np.ndarray) -> np.ndarray: ...
 
 
 def _validated_wilson_cowan_centers(eigenvalue_centers: np.ndarray) -> tuple[np.ndarray, bool]:
@@ -59,11 +96,12 @@ def generate_continuous_reservoir_modes(
 ) -> np.ndarray:
     """Construct stable continuous-time modes centered on a Wilson-Cowan spectrum."""
     centers, oscillatory_centers = _validated_wilson_cowan_centers(eigenvalue_centers)
-    if reservoir_mode == DETERMINISTIC_RESERVOIR_MODE:
+    canonical_mode = normalize_reservoir_mode(reservoir_mode)
+    if canonical_mode == DETERMINISTIC_POLES_MODE:
         return centers
-    if reservoir_mode != GAUSSIAN_EIGENVALUE_CLOUD_MODE:
+    if canonical_mode != DISTRIBUTED_POLES_MODE:
         raise ValueError(
-            "reservoir_mode must be 'deterministic' or 'gaussian_eigenvalue_cloud'."
+            "generate_continuous_reservoir_modes only supports deterministic or distributed poles."
         )
     if isinstance(reservoir_size, bool) or not isinstance(reservoir_size, (int, np.integer)):
         raise ValueError("reservoir_size must be a positive integer.")
@@ -105,13 +143,29 @@ def generate_continuous_reservoir_modes(
 
 @dataclass
 class PhysicsInformedReservoir:
-    reservoir: ComplexESN
+    reservoir: ReservoirDynamics
     readout: LinearReadout | None = None
 
     @staticmethod
     def _real_features(states: np.ndarray) -> np.ndarray:
-        states = np.asarray(states, dtype=np.complex128)
-        return np.concatenate((states.real, states.imag), axis=1)
+        states = np.asarray(states)
+        if states.ndim != 2:
+            raise ValueError("Reservoir states must be a two-dimensional array.")
+        if np.iscomplexobj(states):
+            complex_states = np.asarray(states, dtype=np.complex128)
+            return np.concatenate((complex_states.real, complex_states.imag), axis=1)
+        real_states = np.asarray(states, dtype=np.float64)
+        if not np.all(np.isfinite(real_states)):
+            raise FloatingPointError("Reservoir features became non-finite.")
+        return real_states
+
+    @property
+    def reservoir_state_dimension(self) -> int:
+        """Number of real-valued features presented to the readout per sample."""
+        state = np.asarray(self.reservoir.state)
+        if state.ndim != 1:
+            raise ValueError("Reservoir state must be one-dimensional.")
+        return int(2 * state.size if np.iscomplexobj(state) else state.size)
 
     def fit_one_step(
         self,

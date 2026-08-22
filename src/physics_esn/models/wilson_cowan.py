@@ -2,10 +2,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
+from types import MappingProxyType
+from typing import Protocol
 
 import numpy as np
 from scipy import optimize
 from scipy.special import expit
+
+
+# These are the bounds used by the existing Wilson--Cowan fit.  Keeping them
+# with the canonical model lets fitting and reservoir parameter populations use
+# the same definition instead of slowly diverging in separate modules.
+WILSON_COWAN_PARAMETER_BOUNDS = MappingProxyType(
+    {
+        "tau_e": (0.002, 0.1),
+        "tau_i": (0.002, 0.1),
+        "w_ee": (0.0, 20.0),
+        "w_ei": (0.0, 20.0),
+        "w_ie": (0.0, 20.0),
+        "w_ii": (0.0, 20.0),
+        "p": (-3.0, 3.0),
+        "q": (-3.0, 3.0),
+    }
+)
+WILSON_COWAN_STATE_BOUNDS = (0.0, 1.0)
+
+
+class WilsonCowanParameterLike(Protocol):
+    """Scalar or broadcastable Wilson--Cowan parameter container."""
+
+    tau_e: float | np.ndarray
+    tau_i: float | np.ndarray
+    w_ee: float | np.ndarray
+    w_ei: float | np.ndarray
+    w_ie: float | np.ndarray
+    w_ii: float | np.ndarray
+    p: float | np.ndarray
+    q: float | np.ndarray
+    sigmoid_gain: float | np.ndarray
+    sigmoid_theta: float | np.ndarray
 
 
 @dataclass(frozen=True)
@@ -42,30 +77,60 @@ class WilsonCowanParameters:
             raise ValueError("Sigmoid gain must be positive.")
 
 
-def sigmoid(x: np.ndarray | float, gain: float, theta: float) -> np.ndarray | float:
+def sigmoid(
+    x: np.ndarray | float,
+    gain: np.ndarray | float,
+    theta: np.ndarray | float,
+) -> np.ndarray | float:
     return expit(gain * (np.asarray(x) - theta))
 
 
-def sigmoid_derivative(x: np.ndarray | float, gain: float, theta: float) -> np.ndarray | float:
+def sigmoid_derivative(
+    x: np.ndarray | float,
+    gain: np.ndarray | float,
+    theta: np.ndarray | float,
+) -> np.ndarray | float:
     s = sigmoid(x, gain, theta)
     return gain * s * (1.0 - s)
 
 
+def wilson_cowan_vector_field(
+    e: np.ndarray | float,
+    i: np.ndarray | float,
+    params: WilsonCowanParameterLike,
+    external_e: np.ndarray | float = 0.0,
+    external_i: np.ndarray | float = 0.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate the canonical Wilson--Cowan vector field.
+
+    Time constants and integration time are measured in seconds.  ``E`` and
+    ``I`` are dimensionless population activities.  External currents enter
+    inside the corresponding sigmoid and can be scalars or arrays broadcastable
+    with the state and parameter arrays.
+    """
+
+    e_values = np.asarray(e, dtype=np.float64)
+    i_values = np.asarray(i, dtype=np.float64)
+    input_e = params.w_ee * e_values - params.w_ei * i_values + params.p + external_e
+    input_i = params.w_ie * e_values - params.w_ii * i_values + params.q + external_i
+    de_dt = (
+        -e_values + sigmoid(input_e, params.sigmoid_gain, params.sigmoid_theta)
+    ) / params.tau_e
+    di_dt = (
+        -i_values + sigmoid(input_i, params.sigmoid_gain, params.sigmoid_theta)
+    ) / params.tau_i
+    return np.asarray(de_dt, dtype=np.float64), np.asarray(di_dt, dtype=np.float64)
+
+
 def wilson_cowan_rhs(state: np.ndarray, params: WilsonCowanParameters) -> np.ndarray:
     e, i = np.asarray(state, dtype=np.float64)
-    input_e = params.w_ee * e - params.w_ei * i + params.p
-    input_i = params.w_ie * e - params.w_ii * i + params.q
-    de_dt = (-e + sigmoid(input_e, params.sigmoid_gain, params.sigmoid_theta)) / params.tau_e
-    di_dt = (-i + sigmoid(input_i, params.sigmoid_gain, params.sigmoid_theta)) / params.tau_i
+    de_dt, di_dt = wilson_cowan_vector_field(e, i, params)
     return np.array([de_dt, di_dt], dtype=np.float64)
 
 
 def _rhs_components(e: float, i: float, params: WilsonCowanParameters) -> tuple[float, float]:
-    input_e = params.w_ee * e - params.w_ei * i + params.p
-    input_i = params.w_ie * e - params.w_ii * i + params.q
-    de_dt = (-e + float(sigmoid(input_e, params.sigmoid_gain, params.sigmoid_theta))) / params.tau_e
-    di_dt = (-i + float(sigmoid(input_i, params.sigmoid_gain, params.sigmoid_theta))) / params.tau_i
-    return de_dt, di_dt
+    de_dt, di_dt = wilson_cowan_vector_field(e, i, params)
+    return float(de_dt), float(di_dt)
 
 
 def simulate_wilson_cowan(

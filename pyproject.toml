@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "physics-esn"
 version = "0.1.0"
-description = "Wilson-Cowan EEG proof-of-concept for physics-informed reservoirs"
+description = "Four-mode Wilson-Cowan reservoir ensemble for EEG experiments"
 requires-python = ">=3.10"
 dependencies = [
   "mne>=1.8",
